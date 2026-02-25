@@ -43,24 +43,86 @@ export const authService = {
       throw new Error(authError?.message || 'Failed to create user');
     }
 
-    // Create user profile
+    // Wait a bit for the trigger to create the profile
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Update the profile that was auto-created by trigger
     const { data: profile, error: profileError } = await supabase
       .from('user_profiles')
-      .insert({
-        id: authData.user.id,
-        email,
+      .update({
         name,
         monthly_income: monthlyIncome,
         dependents,
         password_hash: passwordHash,
       })
+      .eq('id', authData.user.id)
       .select()
       .single();
 
     if (profileError || !profile) {
-      // Rollback auth user creation
-      await supabase.auth.admin.deleteUser(authData.user.id);
-      throw new Error('Failed to create user profile');
+      // If update failed, try to get the profile that was created
+      const { data: existingProfile } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('id', authData.user.id)
+        .single();
+
+      if (!existingProfile) {
+        // Last resort: create profile manually
+        const { data: manualProfile, error: manualError } = await supabase
+          .from('user_profiles')
+          .insert({
+            id: authData.user.id,
+            email,
+            name,
+            monthly_income: monthlyIncome,
+            dependents,
+            password_hash: passwordHash,
+          })
+          .select()
+          .single();
+
+        if (manualError || !manualProfile) {
+          // Rollback auth user creation
+          await supabase.auth.admin.deleteUser(authData.user.id);
+          throw new Error('Failed to create user profile');
+        }
+
+        const user: User = {
+          id: manualProfile.id,
+          email: manualProfile.email,
+          name: manualProfile.name,
+          monthlyIncome: Number(manualProfile.monthly_income),
+          dependents: manualProfile.dependents,
+          createdAt: new Date(manualProfile.created_at),
+          updatedAt: new Date(manualProfile.updated_at),
+        };
+
+        const tokens = generateTokens({
+          userId: user.id,
+          email: user.email,
+        });
+
+        return { user, tokens };
+      }
+
+      // Use existing profile
+      const user: User = {
+        id: existingProfile.id,
+        email: existingProfile.email,
+        name: existingProfile.name,
+        monthlyIncome: Number(existingProfile.monthly_income),
+        dependents: existingProfile.dependents,
+        createdAt: new Date(existingProfile.created_at),
+        updatedAt: new Date(existingProfile.updated_at),
+      };
+
+      const tokens = generateTokens({
+        userId: user.id,
+        email: user.email,
+      });
+
+      return { user, tokens };
     }
 
     const user: User = {
@@ -97,10 +159,15 @@ export const authService = {
       throw new Error('Invalid email or password');
     }
 
+    // Check if password_hash exists
+    if (!profile.password_hash) {
+      throw new Error('Invalid email or password');
+    }
+
     // Verify password
     const isValidPassword = await bcrypt.compare(
       password,
-      profile.password_hash || ''
+      profile.password_hash
     );
 
     if (!isValidPassword) {
@@ -155,6 +222,13 @@ export const authService = {
 
     if (existingProfile) {
       // User exists - update Google ID if needed
+      if (!existingProfile.google_id) {
+        await supabase
+          .from('user_profiles')
+          .update({ google_id: googleId })
+          .eq('id', existingProfile.id);
+      }
+
       user = {
         id: existingProfile.id,
         email: existingProfile.email,
@@ -179,33 +253,60 @@ export const authService = {
         throw new Error('Failed to create Google user');
       }
 
+      // Wait for trigger
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Update the auto-created profile
       const { data: profile, error: profileError } = await supabase
         .from('user_profiles')
-        .insert({
-          id: authData.user.id,
-          email,
+        .update({
           name: name || email.split('@')[0],
-          monthly_income: 0,
-          dependents: 0,
           google_id: googleId,
         })
+        .eq('id', authData.user.id)
         .select()
         .single();
 
       if (profileError || !profile) {
-        await supabase.auth.admin.deleteUser(authData.user.id);
-        throw new Error('Failed to create Google user profile');
-      }
+        // Fallback: create manually
+        const { data: manualProfile, error: manualError } = await supabase
+          .from('user_profiles')
+          .insert({
+            id: authData.user.id,
+            email,
+            name: name || email.split('@')[0],
+            monthly_income: 0,
+            dependents: 0,
+            google_id: googleId,
+          })
+          .select()
+          .single();
 
-      user = {
-        id: profile.id,
-        email: profile.email,
-        name: profile.name,
-        monthlyIncome: 0,
-        dependents: 0,
-        createdAt: new Date(profile.created_at),
-        updatedAt: new Date(profile.updated_at),
-      };
+        if (manualError || !manualProfile) {
+          await supabase.auth.admin.deleteUser(authData.user.id);
+          throw new Error('Failed to create Google user profile');
+        }
+
+        user = {
+          id: manualProfile.id,
+          email: manualProfile.email,
+          name: manualProfile.name,
+          monthlyIncome: 0,
+          dependents: 0,
+          createdAt: new Date(manualProfile.created_at),
+          updatedAt: new Date(manualProfile.updated_at),
+        };
+      } else {
+        user = {
+          id: profile.id,
+          email: profile.email,
+          name: profile.name,
+          monthlyIncome: Number(profile.monthly_income),
+          dependents: profile.dependents,
+          createdAt: new Date(profile.created_at),
+          updatedAt: new Date(profile.updated_at),
+        };
+      }
     }
 
     const tokens = generateTokens({
@@ -217,9 +318,7 @@ export const authService = {
   },
 
   // Refresh tokens
-  async refreshTokens(
-    refreshToken: string
-  ): Promise<AuthTokens> {
+  async refreshTokens(refreshToken: string): Promise<AuthTokens> {
     const payload = verifyRefreshToken(refreshToken);
 
     // Verify user still exists
