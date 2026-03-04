@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { z } from 'zod';
 import { budgetService } from '../../services/budget.service';
+import { supabase } from '../../config/database';
 import {
   sendSuccess,
   sendCreated,
@@ -156,6 +157,89 @@ export const budgetController = {
       );
     } catch (error: any) {
       sendError(res, error.message, 500, 'Failed to get budget range summary');
+    }
+  },
+
+  // POST /api/v1/budget/recalculate
+  async recalculateBudget(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const userId = req.user!.userId;
+
+      // Get user's monthly income
+      const { data: user, error: userError } = await supabase
+        .from('user_profiles')
+        .select('monthly_income')
+        .eq('id', userId)
+        .single();
+
+      if (userError || !user || !user.monthly_income || user.monthly_income <= 0) {
+        sendBadRequest(res, 'Monthly income not set. Please update your profile first.');
+        return;
+      }
+
+      const monthlyIncome = user.monthly_income;
+      const needsAmount = monthlyIncome * 0.5;
+      const wantsAmount = monthlyIncome * 0.3;
+      const savingsAmount = monthlyIncome * 0.2;
+
+      // Delete existing default categories
+      await supabase
+        .from('budget_categories')
+        .delete()
+        .eq('user_id', userId)
+        .eq('is_default', true);
+
+      // Create new default categories
+      const defaultCategories = [
+        // NEEDS (50%)
+        { name: 'Rent/Mortgage', budgeted_amount: needsAmount * 0.4, type: 'needs' },
+        { name: 'Utilities', budgeted_amount: needsAmount * 0.15, type: 'needs' },
+        { name: 'Groceries', budgeted_amount: needsAmount * 0.25, type: 'needs' },
+        { name: 'Transportation', budgeted_amount: needsAmount * 0.15, type: 'needs' },
+        { name: 'Insurance', budgeted_amount: needsAmount * 0.05, type: 'needs' },
+
+        // WANTS (30%)
+        { name: 'Entertainment', budgeted_amount: wantsAmount * 0.3, type: 'wants' },
+        { name: 'Dining Out', budgeted_amount: wantsAmount * 0.3, type: 'wants' },
+        { name: 'Shopping', budgeted_amount: wantsAmount * 0.25, type: 'wants' },
+        { name: 'Hobbies', budgeted_amount: wantsAmount * 0.15, type: 'wants' },
+
+        // SAVINGS (20%)
+        { name: 'Emergency Fund', budgeted_amount: savingsAmount * 0.5, type: 'savings' },
+        { name: 'Investments', budgeted_amount: savingsAmount * 0.3, type: 'growth' },
+        { name: 'Retirement (IPP)', budgeted_amount: savingsAmount * 0.2, type: 'growth' },
+      ];
+
+      const categoriesToInsert = defaultCategories.map((cat) => ({
+        user_id: userId,
+        name: cat.name,
+        budgeted_amount: Math.round(cat.budgeted_amount),
+        type: cat.type,
+        is_default: true,
+      }));
+
+      const { data: newCategories, error } = await supabase
+        .from('budget_categories')
+        .insert(categoriesToInsert)
+        .select();
+
+      if (error) throw error;
+
+      sendSuccess(
+        res,
+        {
+          categories: newCategories,
+          allocation: {
+            needs: needsAmount,
+            wants: wantsAmount,
+            savings: savingsAmount,
+            total: monthlyIncome,
+          },
+        },
+        '50/30/20 budget rules applied successfully'
+      );
+    } catch (error: any) {
+      sendError(res, error.message, 500, 'Failed to recalculate budget');
     }
   },
 };

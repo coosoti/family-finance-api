@@ -20,27 +20,107 @@ export const networthService = {
     netWorth: number;
     totalAssets: number;
     totalLiabilities: number;
+    ippBalance: number;
+    savingsFromBudget: number;
+    investmentValue: number;
+    savingsGoalsTotal: number;
     assets: Asset[];
+    liabilities: Asset[];
   }> {
-    const { data, error } = await supabase
+    // Get all assets and liabilities
+    const { data: assetsData, error: assetsError } = await supabase
       .from('assets')
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: true });
 
-    if (error) throw new Error(error.message);
+    if (assetsError) throw new Error(assetsError.message);
 
-    const assets = (data || []).map(mapAsset);
-    const totalAssets = assets
-      .filter((a) => a.type === 'asset')
-      .reduce((sum, a) => sum + a.amount, 0);
-    const totalLiabilities = assets
-      .filter((a) => a.type === 'liability')
-      .reduce((sum, a) => sum + a.amount, 0);
+    const allItems = (assetsData || []).map(mapAsset);
+    const assets = allItems.filter((a) => a.type === 'asset');
+    const liabilities = allItems.filter((a) => a.type === 'liability');
 
-    const netWorth = await calculateNetWorth(userId);
+    const totalAssets = assets.reduce((sum, a) => sum + a.amount, 0);
+    const totalLiabilities = liabilities.reduce((sum, a) => sum + a.amount, 0);
 
-    return { netWorth, totalAssets, totalLiabilities, assets };
+    // Get IPP balance
+    const { data: ippData } = await supabase
+      .from('ipp_accounts')
+      .select('current_balance')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const ippBalance = Number(ippData?.current_balance) || 0;
+
+    // Get savings from budget categories (Emergency Fund, Investments, Retirement)
+    const { data: savingsCategories } = await supabase
+      .from('budget_categories')
+      .select('id, name, type')
+      .eq('user_id', userId)
+      .in('type', ['savings', 'growth']);
+
+    let savingsFromBudget = 0;
+
+    if (savingsCategories && savingsCategories.length > 0) {
+      const categoryIds = savingsCategories.map((cat: any) => cat.id);
+
+      // Get all transactions for savings/growth categories
+      const { data: savingsTransactions } = await supabase
+        .from('transactions')
+        .select('amount')
+        .eq('user_id', userId)
+        .in('category_id', categoryIds)
+        .eq('type', 'expense'); // These are savings allocations
+
+      savingsFromBudget = (savingsTransactions || []).reduce(
+        (sum: number, tx: any) => sum + Number(tx.amount),
+        0
+      );
+    }
+
+    // Get investment portfolio value
+    const { data: investments } = await supabase
+      .from('investments')
+      .select('units, current_price')
+      .eq('user_id', userId);
+
+    const investmentValue = (investments || []).reduce(
+      (sum: number, inv: any) =>
+        sum + Number(inv.units) * Number(inv.current_price),
+      0
+    );
+
+    // Get savings goals current amount
+    const { data: savingsGoals } = await supabase
+      .from('savings_goals')
+      .select('current_amount')
+      .eq('user_id', userId);
+
+    const savingsGoalsTotal = (savingsGoals || []).reduce(
+      (sum: number, goal: any) => sum + Number(goal.current_amount),
+      0
+    );
+
+    // Calculate comprehensive net worth
+    const netWorth =
+      totalAssets +
+      ippBalance +
+      savingsFromBudget +
+      investmentValue +
+      savingsGoalsTotal -
+      totalLiabilities;
+
+    return {
+      netWorth,
+      totalAssets,
+      totalLiabilities,
+      ippBalance,
+      savingsFromBudget,
+      investmentValue,
+      savingsGoalsTotal,
+      assets,
+      liabilities,
+    };
   },
 
   async getHistory(

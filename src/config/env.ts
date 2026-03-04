@@ -19,7 +19,7 @@ for (const envVar of requiredEnvVars) {
 export const env = {
   // Server
   NODE_ENV: process.env.NODE_ENV || 'development',
-  PORT: parseInt(process.env.PORT || '5000', 10),
+  PORT: parseInt(process.env.PORT || '5001', 10),
   
   // Supabase
   SUPABASE_URL: process.env.SUPABASE_URL!,

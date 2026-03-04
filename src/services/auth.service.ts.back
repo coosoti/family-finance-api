@@ -98,11 +98,6 @@ export const authService = {
           updatedAt: new Date(manualProfile.updated_at),
         };
 
-        // **NEW: Create default budget categories if income provided**
-        if (monthlyIncome > 0) {
-          await this.createDefaultBudgetCategories(user.id, monthlyIncome);
-        }
-
         const tokens = generateTokens({
           userId: user.id,
           email: user.email,
@@ -122,11 +117,6 @@ export const authService = {
         updatedAt: new Date(existingProfile.updated_at),
       };
 
-      // **NEW: Create default budget categories if income provided**
-      if (monthlyIncome > 0) {
-        await this.createDefaultBudgetCategories(user.id, monthlyIncome);
-      }
-
       const tokens = generateTokens({
         userId: user.id,
         email: user.email,
@@ -144,11 +134,6 @@ export const authService = {
       createdAt: new Date(profile.created_at),
       updatedAt: new Date(profile.updated_at),
     };
-
-    // **NEW: Create default budget categories if income provided**
-    if (monthlyIncome > 0) {
-      await this.createDefaultBudgetCategories(user.id, monthlyIncome);
-    }
 
     const tokens = generateTokens({
       userId: user.id,
@@ -416,122 +401,6 @@ export const authService = {
 
     if (error) {
       throw new Error('Failed to send reset email');
-    }
-  },
-
-  // **NEW: Create default budget categories using 50/30/20 rule**
-  async createDefaultBudgetCategories(
-    userId: string,
-    monthlyIncome: number
-  ): Promise<void> {
-    try {
-      const needsAmount = monthlyIncome * 0.5; // 50%
-      const wantsAmount = monthlyIncome * 0.3; // 30%
-      const savingsAmount = monthlyIncome * 0.2; // 20%
-
-      const defaultCategories = [
-        // NEEDS (50%) - Essential expenses
-        {
-          user_id: userId,
-          name: 'Rent/Mortgage',
-          budgeted_amount: Math.round(needsAmount * 0.4),
-          type: 'needs',
-          is_default: true,
-        },
-        {
-          user_id: userId,
-          name: 'Utilities',
-          budgeted_amount: Math.round(needsAmount * 0.15),
-          type: 'needs',
-          is_default: true,
-        },
-        {
-          user_id: userId,
-          name: 'Groceries',
-          budgeted_amount: Math.round(needsAmount * 0.25),
-          type: 'needs',
-          is_default: true,
-        },
-        {
-          user_id: userId,
-          name: 'Transportation',
-          budgeted_amount: Math.round(needsAmount * 0.15),
-          type: 'needs',
-          is_default: true,
-        },
-        {
-          user_id: userId,
-          name: 'Insurance',
-          budgeted_amount: Math.round(needsAmount * 0.05),
-          type: 'needs',
-          is_default: true,
-        },
-
-        // WANTS (30%) - Lifestyle expenses
-        {
-          user_id: userId,
-          name: 'Entertainment',
-          budgeted_amount: Math.round(wantsAmount * 0.3),
-          type: 'wants',
-          is_default: true,
-        },
-        {
-          user_id: userId,
-          name: 'Dining Out',
-          budgeted_amount: Math.round(wantsAmount * 0.3),
-          type: 'wants',
-          is_default: true,
-        },
-        {
-          user_id: userId,
-          name: 'Shopping',
-          budgeted_amount: Math.round(wantsAmount * 0.25),
-          type: 'wants',
-          is_default: true,
-        },
-        {
-          user_id: userId,
-          name: 'Hobbies',
-          budgeted_amount: Math.round(wantsAmount * 0.15),
-          type: 'wants',
-          is_default: true,
-        },
-
-        // SAVINGS (20%) - Future planning
-        {
-          user_id: userId,
-          name: 'Emergency Fund',
-          budgeted_amount: Math.round(savingsAmount * 0.5),
-          type: 'savings',
-          is_default: true,
-        },
-        {
-          user_id: userId,
-          name: 'Investments',
-          budgeted_amount: Math.round(savingsAmount * 0.3),
-          type: 'growth',
-          is_default: true,
-        },
-        {
-          user_id: userId,
-          name: 'Retirement (IPP)',
-          budgeted_amount: Math.round(savingsAmount * 0.2),
-          type: 'growth',
-          is_default: true,
-        },
-      ];
-
-      const { error } = await supabase
-        .from('budget_categories')
-        .insert(defaultCategories);
-
-      if (error) {
-        console.error('Error creating default categories:', error);
-        // Don't throw - user registration should still succeed
-      }
-    } catch (error) {
-      console.error('Failed to create default budget categories:', error);
-      // Don't throw - allow registration to complete
     }
   },
 };
