@@ -10,6 +10,8 @@ import incomeRoutes from './income.routes';
 import analyticsRoutes from './analytics.routes';
 import historyRoutes from './history.routes';
 import profileRoutes from './profile.routes';
+import recurringRoutes from './recurring.routes';
+
 
 const router = Router();
 
@@ -24,5 +26,6 @@ router.use('/investments', investmentsRoutes);
 router.use('/income', incomeRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/history', historyRoutes);
+router.use('/recurring', recurringRoutes);
 
 export default router;

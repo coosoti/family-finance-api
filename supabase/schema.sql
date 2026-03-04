@@ -451,3 +451,130 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+
+-- Recurring Bills & Subscriptions
+-- ============================================================
+
+-- ── recurring_items ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS recurring_items (
+  id              UUID          DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id         UUID          NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+
+  name            VARCHAR(255)  NOT NULL,
+  provider        VARCHAR(255),
+  category        VARCHAR(100)  NOT NULL,
+  type            VARCHAR(20)   NOT NULL CHECK (type IN ('bill', 'subscription')),
+
+  amount          DECIMAL(12,2) NOT NULL,
+  currency        VARCHAR(10)   NOT NULL DEFAULT 'KES',
+
+  billing_cycle   VARCHAR(20)   NOT NULL DEFAULT 'monthly'
+                  CHECK (billing_cycle IN ('weekly', 'monthly', 'quarterly', 'annually')),
+  billing_day     INTEGER       NOT NULL CHECK (billing_day BETWEEN 1 AND 31),
+  next_due_date   DATE          NOT NULL,
+  last_paid_date  DATE,
+
+  is_active       BOOLEAN       NOT NULL DEFAULT true,
+  auto_categorize BOOLEAN       NOT NULL DEFAULT true,
+  auto_create_tx  BOOLEAN       NOT NULL DEFAULT false,
+
+  last_used_date  DATE,
+  usage_count_30d INTEGER       NOT NULL DEFAULT 0,
+
+  notes           TEXT,
+  created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+-- ── recurring_payments ───────────────────────────────────────
+CREATE TABLE IF NOT EXISTS recurring_payments (
+  id                UUID          DEFAULT gen_random_uuid() PRIMARY KEY,
+  recurring_item_id UUID          NOT NULL REFERENCES recurring_items(id) ON DELETE CASCADE,
+  user_id           UUID          NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+
+  due_date          DATE          NOT NULL,
+  paid_date         DATE,
+  amount            DECIMAL(12,2) NOT NULL,
+
+  status            VARCHAR(20)   NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'paid', 'overdue', 'skipped')),
+
+  transaction_id    UUID,
+  notes             TEXT,
+  created_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+-- ── Indexes ───────────────────────────────────────────────────
+CREATE INDEX IF NOT EXISTS idx_recurring_items_user_id
+  ON recurring_items(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_recurring_items_next_due
+  ON recurring_items(next_due_date)
+  WHERE is_active = true;
+
+CREATE INDEX IF NOT EXISTS idx_recurring_payments_item
+  ON recurring_payments(recurring_item_id);
+
+CREATE INDEX IF NOT EXISTS idx_recurring_payments_due_date
+  ON recurring_payments(due_date);
+
+-- ── updated_at trigger ────────────────────────────────────────
+-- (reuse existing set_updated_at function if already defined, otherwise add it)
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_recurring_items_updated_at ON recurring_items;
+CREATE TRIGGER trg_recurring_items_updated_at
+  BEFORE UPDATE ON recurring_items
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ── RLS ───────────────────────────────────────────────────────
+ALTER TABLE recurring_items    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recurring_payments ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "users_own_recurring_items"    ON recurring_items;
+DROP POLICY IF EXISTS "users_own_recurring_payments" ON recurring_payments;
+
+CREATE POLICY "users_own_recurring_items" ON recurring_items
+  FOR ALL USING (auth.uid() = user_id);
+
+CREATE POLICY "users_own_recurring_payments" ON recurring_payments
+  FOR ALL USING (auth.uid() = user_id);
+
+-- ── Seed: known subscription providers (optional lookup table) ─
+CREATE TABLE IF NOT EXISTS subscription_providers (
+  id       SERIAL       PRIMARY KEY,
+  name     VARCHAR(100) NOT NULL UNIQUE,
+  category VARCHAR(100) NOT NULL
+);
+
+INSERT INTO subscription_providers (name, category) VALUES
+  ('Netflix',          'Entertainment'),
+  ('Spotify',          'Entertainment'),
+  ('YouTube Premium',  'Entertainment'),
+  ('ShowMax',          'Entertainment'),
+  ('DSTV',             'Entertainment'),
+  ('Apple TV+',        'Entertainment'),
+  ('iCloud',           'Cloud Storage'),
+  ('Google One',       'Cloud Storage'),
+  ('Dropbox',          'Cloud Storage'),
+  ('Microsoft 365',    'Software'),
+  ('Adobe Creative',   'Software'),
+  ('ChatGPT Plus',     'Software'),
+  ('Figma',            'Software'),
+  ('GitHub',           'Software'),
+  ('Safaricom Home',   'Internet'),
+  ('Zuku',             'Internet'),
+  ('Faiba',            'Internet'),
+  ('Gym Membership',   'Health & Fitness'),
+  ('Rent',             'Housing'),
+  ('KPLC',             'Utilities'),
+  ('Nairobi Water',    'Utilities'),
+  ('Car Insurance',    'Insurance'),
+  ('Health Insurance', 'Insurance')
+ON CONFLICT (name) DO NOTHING;

@@ -309,3 +309,94 @@ export interface TransactionSocketPayload {
   transaction: Transaction;
   userId: string;
 }
+
+// ============================================================
+// RECURR
+// ============================================================
+
+export type BillingCycle = 'weekly' | 'monthly' | 'quarterly' | 'annually';
+export type RecurringType = 'bill' | 'subscription';
+export type PaymentStatus = 'pending' | 'paid' | 'overdue' | 'skipped';
+
+export interface RecurringItem {
+  id: string;
+  user_id: string;
+  name: string;
+  provider?: string;
+  category: string;
+  type: RecurringType;
+  amount: number;
+  currency: string;
+  billing_cycle: BillingCycle;
+  billing_day: number;
+  next_due_date: string;
+  last_paid_date?: string;
+  is_active: boolean;
+  auto_categorize: boolean;
+  auto_create_tx: boolean;
+  last_used_date?: string;
+  usage_count_30d: number;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RecurringPayment {
+  id: string;
+  recurring_item_id: string;
+  user_id: string;
+  due_date: string;
+  paid_date?: string;
+  amount: number;
+  status: PaymentStatus;
+  transaction_id?: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface CreateRecurringItemDto {
+  name: string;
+  provider?: string;
+  category: string;
+  type: RecurringType;
+  amount: number;
+  currency?: string;
+  billing_cycle: BillingCycle;
+  billing_day: number;
+  next_due_date: string;
+  is_active?: boolean;
+  auto_categorize?: boolean;
+  auto_create_tx?: boolean;
+  notes?: string;
+}
+
+export interface UpdateRecurringItemDto extends Partial<CreateRecurringItemDto> {}
+
+export interface MarkPaidDto {
+  paid_date?: string;
+  amount?: number;
+  create_transaction?: boolean;
+  notes?: string;
+}
+
+export interface UpcomingBill {
+  recurring_item: RecurringItem;
+  due_date: string;
+  days_until_due: number;
+  status: PaymentStatus;
+}
+
+export interface UnusedSubscription {
+  recurring_item: RecurringItem;
+  days_since_last_used: number | null;
+  months_paid_without_use: number;
+  potential_annual_saving: number;
+}
+
+export interface RecurringSummary {
+  total_monthly_bills: number;
+  total_monthly_subscriptions: number;
+  upcoming_7_days: number;
+  overdue_count: number;
+  unused_subscriptions: number;
+}
