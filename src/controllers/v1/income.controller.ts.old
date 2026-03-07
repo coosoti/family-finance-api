@@ -66,52 +66,33 @@ export const incomeController = {
 
   async create(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      // Use safeParse instead of parse to handle errors gracefully
-      const validationResult = createSchema.safeParse(req.body);
-      
-      if (!validationResult.success) {
-        // Safely access error messages
-        const errorMessage = validationResult.error.issues[0]?.message || 'Validation error';
-        sendBadRequest(res, errorMessage);
-        return;
-      }
-      
-      const validated = validationResult.data;
+      const validated = createSchema.parse(req.body);
       const income = await incomeService.create(req.user!.userId, validated);
       sendCreated(res, { income }, 'Income created');
     } catch (error: any) {
-      console.error('Error creating income:', error);
-      sendError(res, error.message, 500, 'Failed to create income');
+      if (error.name === 'ZodError') {
+        sendBadRequest(res, error.errors[0].message);
+      } else {
+        sendError(res, error.message, 400, 'Failed to create income');
+      }
     }
   },
 
   async update(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      // Use safeParse instead of parse
-      const validationResult = updateSchema.safeParse(req.body);
-      
-      if (!validationResult.success) {
-        const errorMessage = validationResult.error.issues[0]?.message || 'Validation error';
-        sendBadRequest(res, errorMessage);
-        return;
-      }
-      
-      const validated = validationResult.data;
+      const validated = updateSchema.parse(req.body);
       const income = await incomeService.update(
         req.user!.userId,
         req.params.id as string,
         validated
       );
-      
-      if (!income) {
-        sendNotFound(res, 'Income');
-        return;
-      }
-      
       sendSuccess(res, { income }, 'Income updated');
     } catch (error: any) {
-      console.error('Error updating income:', error);
-      sendError(res, error.message, 500, 'Failed to update income');
+      if (error.name === 'ZodError') {
+        sendBadRequest(res, error.errors[0].message);
+      } else {
+        sendError(res, error.message, 400, 'Failed to update income');
+      }
     }
   },
 
@@ -128,8 +109,7 @@ export const incomeController = {
       await incomeService.delete(req.user!.userId, req.params.id as string);
       sendSuccess(res, null, 'Income deleted');
     } catch (error: any) {
-      console.error('Error deleting income:', error);
       sendError(res, error.message, 500, 'Failed to delete income');
     }
   },
-}
+};
